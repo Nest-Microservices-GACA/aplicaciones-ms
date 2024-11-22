@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AplicacionesModule } from './aplicaciones/aplicaciones.module';
 import { envs } from './config';
+import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
@@ -21,7 +22,8 @@ import { envs } from './config';
       synchronize:false
     }),
 
-    AplicacionesModule
+    AplicacionesModule,
+    CommonModule
   ],
   controllers: [],
   providers: [],
