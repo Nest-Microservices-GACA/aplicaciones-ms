@@ -3,7 +3,7 @@ import { RpcException } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 
 import { User } from './dto';
-import { Aplicacion } from './entities';
+import { Aplicacion, Aplicacionstatus } from './entities';
 import { Repository } from 'typeorm';
 import { CommonService } from '../common/common.service';
 
@@ -15,6 +15,8 @@ export class AplicacionesService {
     @InjectRepository(Aplicacion)
     private readonly appRepository: Repository<Aplicacion>,
     private readonly encryptionService: CommonService,
+    @InjectRepository(Aplicacionstatus)
+    private readonly appStatusRepository: Repository<Aplicacionstatus>, 
   ){}
 
   async findAll(user: User) {
@@ -55,20 +57,53 @@ export class AplicacionesService {
     }
   }
 
-  // create(createAplicacioneDto: CreateAplicacioneDto) {
-  //   return 'This action adds a new aplicacione';
-  // }
+  async updateStatusApp(idu_aplicacion: number, newStatusId: number) {
+    try{
+
+      const app = await this.appRepository.findOne({
+        where: { idu_aplicacion },
+        relations: ['applicationstatus'],
+      });
+
+      if (!app){
+        this.handleErrorDB(
+          'updateStatusApp', 
+          `App ${ idu_aplicacion } no encontrado`, 
+          new Error('App no encontrado')
+        )
+      }
+      
+      const newStatus = await this.appStatusRepository.findOneBy({ idu_estatus_aplicacion: newStatusId });
+      if(!newStatus){
+        this.handleErrorDB(
+          'updateStatusApp', 
+          `Status ${ newStatusId } no encontrado`, 
+          new Error('Status no encontrado')
+        )
+      }
+
+      app.applicationstatus = newStatus;
+      await this.appRepository.save(app);
+
+      app.nom_aplicacion = this.encryptionService.decrypt(app.nom_aplicacion);
+      return app;
+      
+    } catch (error) {
+
+      this.handleErrorDB(
+        'updateStatusApp', 
+        `Hubo un error actualizando estado de app ${idu_aplicacion}`, 
+        error
+      );
+    }
+  }
 
 
-  // findOne(id: number) {
-  //   return `This action returns a #${id} aplicacione`;
-  // }
-
-  // update(id: number, updateAplicacioneDto: UpdateAplicacioneDto) {
-  //   return `This action updates a #${id} aplicacione`;
-  // }
-
-  // remove(id: number) {
-  //   return `This action removes a #${id} aplicacione`;
-  // }
+  private handleErrorDB(method:string, message: string, error: any){
+    this.logger.error(`[aplicaciones.${ method }.service]`,error);
+    throw new RpcException({
+      status: 'Error',
+      message: `${message}: ${error}`,
+    });
+  }
 }
