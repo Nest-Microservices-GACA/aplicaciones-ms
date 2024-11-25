@@ -8,7 +8,14 @@ interface EnvVars {
   DB_PASSWORD: string;
   DB_NAME: string;
   DB_PORT: number;
-  PORT: number;
+
+  APP_MS_PORT: number;
+  UPDATE_MS_PORT: number;
+  UPDATE_MS_HOST:string;
+
+  PATH_PROJECTS: string; 
+  RVIA_ENVIRONMENT: number;
+  RVIA_PATH: string;
 }
 
 const envsSchema = joi.object({
@@ -17,7 +24,14 @@ const envsSchema = joi.object({
   DB_PASSWORD: joi.string().required(),
   DB_NAME: joi.string().required(),
   DB_PORT: joi.number().required(),
-  PORT: joi.number().required(),
+
+  APP_MS_PORT: joi.number().required(),
+  UPDATE_MS_PORT: joi.number().required(),
+  UPDATE_MS_HOST: joi.string().required(),
+
+  PATH_PROJECTS: joi.string().required(), 
+  RVIA_ENVIRONMENT: joi.number().required(),
+  RVIA_PATH: joi.string().required()
 })
 .unknown(true);
 
@@ -36,5 +50,12 @@ export const envs = {
   dbPassword: envVars.DB_PASSWORD,
   dbName: envVars.DB_NAME,
   dbPort: envVars.DB_PORT,
-  port: envVars.PORT,
+
+  apps_ms_port:  envVars.APP_MS_PORT,
+  update_ms_port: envVars.UPDATE_MS_PORT,
+  update_ms_host: envVars.UPDATE_MS_HOST,
+  
+  path_projects: envVars.PATH_PROJECTS,
+  rvia_environment: envVars.RVIA_ENVIRONMENT,
+  rvia_path: envVars.RVIA_PATH,
 };
