@@ -1,12 +1,13 @@
+import { ClientsModule, Transport } from '@nestjs/microservices';
+import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { AplicacionesService } from './aplicaciones.service';
-import { AplicacionesController } from './aplicaciones.controller';
 import { Aplicacion, Aplicacionstatus, Checkmarx, Scan, Sourcecode } from './entities';
+import { AplicacionesController } from './aplicaciones.controller';
+import { AplicacionesService } from './aplicaciones.service';
 import { CommonModule } from '../common/common.module';
-import { ClientsModule, Transport } from '@nestjs/microservices';
-import { envs, RVIAAC_SERVICE, RVIADOC_SERVICE, RVIAMI_SERVICE, RVIASA_SERVICE } from 'src/config';
+import { envs, RVIAAC_SERVICE, RVIADOC_SERVICE, RVIAMI_SERVICE, RVIASA_SERVICE } from '../config';
 
 @Module({
   controllers: [AplicacionesController],
@@ -54,6 +55,7 @@ import { envs, RVIAAC_SERVICE, RVIADOC_SERVICE, RVIAMI_SERVICE, RVIASA_SERVICE }
       }
     ]),
     CommonModule,
+    HttpModule,
   ]
 })
 export class AplicacionesModule {}

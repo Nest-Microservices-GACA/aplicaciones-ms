@@ -1,21 +1,25 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { catchError, lastValueFrom } from 'rxjs';
 import { ClientProxy } from '@nestjs/microservices';
-import { RpcException } from '@nestjs/microservices';
-import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { lastValueFrom } from 'rxjs';
+import { HttpService } from '@nestjs/axios';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { join } from 'path'; 
+import { pipeline } from 'stream';
+import { promisify } from 'util';
+import { RpcException } from '@nestjs/microservices';
+import * as fs from 'fs';
 
 import { Repository } from 'typeorm';
-import { join } from 'path';
-import * as fs from 'fs';
-import * as unzipper from 'unzipper';
+import * as fsExtra from 'fs-extra';
 import * as seven from '7zip-min';
+import * as unzipper from 'unzipper';
 
-import { CreateAplicacionDto, User } from './dto';
 import { Aplicacion, Aplicacionstatus, Sourcecode } from './entities';
 import { CommonService } from '../common/common.service';
+import { CreateAplicacionDto, CreateAplicacionUrlDto, User } from './dto';
 import { DataToMS, fileRVIA, NumberAction, ResponseProcess } from './interfaces';
-import { envs, RVIAAC_SERVICE, RVIAMI_SERVICE } from '../config';
+import { envs, RVIAAC_SERVICE, RVIADOC_SERVICE, RVIAMI_SERVICE, RVIASA_SERVICE } from '../config';
 
 @Injectable()
 export class AplicacionesService {
@@ -32,8 +36,11 @@ export class AplicacionesService {
     private readonly sourceCodeRepository: Repository<Sourcecode>,
     private readonly encryptionService: CommonService,
     private readonly configService: ConfigService,
-    @Inject(RVIAMI_SERVICE) private readonly rviamiClient: ClientProxy,
-    @Inject(RVIAAC_SERVICE) private readonly rviaacClient: ClientProxy,
+    private readonly httpService: HttpService,
+    @Inject(RVIAMI_SERVICE)  private readonly rviamiClient:  ClientProxy,
+    @Inject(RVIAAC_SERVICE)  private readonly rviaacClient:  ClientProxy,
+    @Inject(RVIADOC_SERVICE) private readonly rviadocClient: ClientProxy,
+    @Inject(RVIASA_SERVICE)  private readonly rviasaClient:  ClientProxy,
   ){
     const rviaPath = this.configService.get<string>('RVIA_PATH');
   
@@ -70,12 +77,11 @@ export class AplicacionesService {
       return { aplicaciones, total: aplicaciones.length };
 
     } catch (error) {
-
-      this.logger.error('[aplicaciones.findAllAppTestCases.service]',error);
-      throw new RpcException({
-        status: 'Error',
-        message: `Hubo un error consultando apps: ${error}`,
-      });
+      return this.handleError(
+        'findAll', 
+        'Hubo un error consultando apps',
+        error
+      );
     }
   }
 
@@ -97,7 +103,7 @@ export class AplicacionesService {
       
       const newStatus = await this.appStatusRepository.findOneBy({ idu_estatus_aplicacion: newStatusId });
       if(!newStatus){
-        this.handleError(
+        return this.handleError(
           'updateStatusApp', 
           `Status ${ newStatusId } no encontrado`, 
           new Error('Status no encontrado')
@@ -111,8 +117,7 @@ export class AplicacionesService {
       return app;
       
     } catch (error) {
-
-      this.handleError(
+      return this.handleError(
         'updateStatusApp', 
         `Hubo un error actualizando estado de app ${idu_aplicacion}`, 
         error
@@ -132,121 +137,259 @@ export class AplicacionesService {
     
     const zipFilePath = join(dirName, `${appNameWIdu}.${fileExtension}`);
     const zipBuffer = Buffer.from(zipFile.buffer.data);
-    fs.writeFileSync(zipFilePath, zipBuffer);
+    await fsExtra.writeFile(zipFilePath, zipBuffer);
     
     const extractPath = join(dirName, appNameWIdu);
-    fs.mkdirSync(extractPath, { recursive: true });
-    if (zipFile.mimetype === 'application/zip' || zipFile.mimetype === 'application/x-zip-compressed') {
-      await fs.createReadStream(zipFilePath)
-        .pipe(unzipper.Extract({ path: extractPath }))
-        .promise()
-        .then(() => {})
-        .catch(error => {
-          this.handleError('createAppWithFiles', 'Error al descomprimir el archivo .zip', error);
-        });
-    }else if (zipFile.mimetype === 'application/x-7z-compressed') {
-      await new Promise<void>((resolve, reject) => {
-        seven.unpack(zipFilePath, extractPath, error => {
-          if (error) {
-            reject(this.handleError('createAppWithFiles','Error al descomprimir el archivo .7z', error));
-          }
-          
-          resolve();
-        });
-      });
-    }
-
-    const sourcecode = this.sourceCodeRepository.create({
-      nom_codigo_fuente: this.encryptionService.encrypt(appName),
-      nom_directorio: this.encryptionService.encrypt(extractPath),
-    });
-    
-    try { 
-      await this.sourceCodeRepository.save(sourcecode);
-
-    }catch(error) {
-      this.handleError('createAppWithFiles','Error al guardar sourcecode en BD', error);
-    }
-
-    let estatu = await this.appStatusRepository.findOneBy({ idu_estatus_aplicacion: 2 });  
-    if(!estatu){
-      this.handleError(
-        'updateStatusApp', 
-        `Status ${ 2 } no encontrado`, 
-        new Error('Status no encontrado')
-      )
-    }
-
-    estatu.des_estatus_aplicacion = this.encryptionService.decrypt(estatu.des_estatus_aplicacion);
-    
-    const aplicacion = new Aplicacion();
+    await fsExtra.mkdirp(extractPath);
 
     try {
-      const opciones = createAplicacionDto.opc_arquitectura;
+      if (zipFile.mimetype === 'application/zip' || zipFile.mimetype === 'application/x-zip-compressed') {
+        await fsExtra.createReadStream(zipFilePath)
+          .pipe(unzipper.Extract({ path: extractPath }))
+          .promise()
+          .then(() => {})
+          .catch(error => {
+            this.handleError('createAppWithFiles', 'Error al descomprimir el archivo .zip', error);
+          });
+      } else if (zipFile.mimetype === 'application/x-7z-compressed') {
+        await new Promise<void>((resolve, reject) => {
+          seven.unpack(zipFilePath, extractPath, error => {
+            if (error) {
+              reject(this.handleError('createAppWithFiles', 'Error al descomprimir el archivo .7z', error));
+            }
+            resolve();
+          });
+        });
+      }
+    } catch (error) {
+      this.handleError('createAppWithFiles', 'Error durante la descompresión', error);
+    }
 
-      aplicacion.nom_aplicacion = this.encryptionService.encrypt(appName);
-      aplicacion.idu_proyecto = idu_proyecto;
-      aplicacion.num_accion = createAplicacionDto.num_accion;
-      aplicacion.opc_arquitectura = createAplicacionDto.opc_arquitectura || {"1": false, "2": false, "3": false, "4": false};
-      aplicacion.opc_lenguaje = createAplicacionDto.opc_lenguaje;
-      aplicacion.opc_estatus_doc = opciones['1'] ? 2 : 0;
-      aplicacion.opc_estatus_doc_code = opciones['2'] ? 2 : 0;
-      aplicacion.opc_estatus_caso = opciones['3'] ? 2 : 0;
-      aplicacion.opc_estatus_calificar = opciones['4'] ? 2 : 0;
-      aplicacion.applicationstatus = estatu;
-      aplicacion.sourcecode = sourcecode;
-      aplicacion.idu_usuario = user.idu_usuario;
-      
-    }catch(error) {
-      this.handleError('createAppWithFiles','Error al guardar aplicacion en BD', error);
-    } 
-
-    await this.appRepository.save(aplicacion);
-
+    const aplicacion = await this.saveAppBD(createAplicacionDto, idu_proyecto, appName, extractPath, user.idu_usuario);
+    
     const dataToProcess = { 
       idu_proyecto,
       num_accion: 0,
       numero_empleado: user.numero_empleado,
       path_project: extractPath
     }
-    
-    let rviaProcess = { isProcessStarted: false, message: 'Error al crear el app y num_accion' };
 
-    if(createAplicacionDto.num_accion === NumberAction.UPDATECODE){
-      dataToProcess.num_accion = NumberAction.UPDATECODE;
-      rviaProcess = await this.initUpdateCode(dataToProcess);
+    return await this.initProcessRVIA(dataToProcess, aplicacion, createAplicacionDto.num_accion);
+  }
+
+  async createAppWithGit(createAplicacionDto: CreateAplicacionUrlDto, user: User, pdfFile: fileRVIA){
+    try {
+      const repoInfo = this.parseGitHubURL(createAplicacionDto.url);
+      if (!repoInfo) {
+        this.handleError('createAppWithGit','paserGitHubURL', new Error('Invalid GitHub repository URL'));
+      }
+
+      return await this.processRepository(repoInfo.repoName, repoInfo.userName, user, createAplicacionDto ,pdfFile,  'GitHub');
+
+    } catch (error) {
+      return this.handleError('createAppWithGit','Error al crear app con github', error);
+    }
+  }
+
+  private async processRepository(repoName: string, repoUserName: string, user: User, infoApp: CreateAplicacionDto,  file, platform: string) {
+
+    const obj = this.addon.CRvia(this.crviaEnvironment);
+    const idu_proyecto = obj.createIDProject();
+
+    const streamPipeline = promisify(pipeline);
+    const dirName = envs.path_projects;
+    const appNameWIdu = `${idu_proyecto}_${repoName}`
+    const repoFolderPath = join(dirName, `${appNameWIdu}.zip`);
+    const finalFolder = join(dirName, appNameWIdu);
+
+    const branches = ['main','master'];
+    let zipUrl: string | null = null;
+
+    for (const branch of branches) {
+      const potentialUrl = platform === 'GitHub'
+        ? `https://github.com/${repoUserName}/${repoName}/archive/refs/heads/${branch}.zip`
+        : `https://gitlab.com/${repoUserName}/${repoName}/-/archive/${branch}/${repoName}-${branch}.zip`;
+
+      try {
+        await lastValueFrom(this.httpService.head(potentialUrl));
+        zipUrl = potentialUrl;
+        break;
+      } catch (error) {
+        continue;
+      }
     }
 
-    // if(createAplicacionDto.num_accion === NumberAction.SANITIZECODE){
-    //   // TODO llamar ms para guardar pdf
-    //   // TODO llamar al ms de sanitización
+    if (!zipUrl) {
+      return this.handleError('processRepository','Error al crear app con github', new Error('No se encontró ninguna rama válida (main o master)'));
+    }
 
-    // }
+    const response = await lastValueFrom(
+      this.httpService.get(zipUrl, { responseType: 'stream' }).pipe(
+        catchError(error => {
+          return [];
+        }),
+      ),
+    );
 
-    if(createAplicacionDto.num_accion === NumberAction.MIGRATIONCODE){
-      dataToProcess.num_accion = NumberAction.MIGRATIONCODE;
-      rviaProcess = await this.initMigrationCode(dataToProcess);
+    if (response.length === 0) {
+      return this.handleError('processRepository', 'Error al descargar el repositorio', new Error('Error al descargar el repositorio'));
+    }
+
+    try {
+
+      await streamPipeline(response.data, fs.createWriteStream(repoFolderPath));
+      console.log(appNameWIdu);
+      const tempFolderPath = join(dirName, `temp-${appNameWIdu}`);
+      
+      await unzipper.Open.file(repoFolderPath)
+        .then(d => d.extract({ path: tempFolderPath }))
+        .then(async () => {
+          const extractedFolders = await fsExtra.readdir(tempFolderPath);
+          const extractedFolder = join(tempFolderPath, extractedFolders.find(folder => folder.includes(repoName)));
+
+          await fsExtra.ensureDir(finalFolder);
+          await fsExtra.copy(extractedFolder, finalFolder);
+          await fsExtra.remove(tempFolderPath);
+        });
+
+      const aplicacion = await this.saveAppBD(infoApp, idu_proyecto, repoName, finalFolder, user.idu_usuario);
+      
+      const dataToProcess = { 
+        idu_proyecto,
+        num_accion: 0,
+        numero_empleado: user.numero_empleado,
+        path_project: finalFolder
+      }
+
+      return await this.initProcessRVIA(dataToProcess, aplicacion, infoApp.num_accion);
+      
+    } catch (error) {
+      await fsExtra.remove(finalFolder);
+      await fsExtra.remove(repoFolderPath);
+      return this.handleError('processRepository','Error al procesar el repositorio', error);
+
     }
     
+  }
+
+  private parseGitHubURL(url: string): { repoName: string, userName: string } | null {
+    const regex = /github\.com\/([^\/]+)\/([^\/]+)\.git$/;
+    const match = url.match(regex);
+    if (match) {
+      return { userName: match[1], repoName: match[2] };
+    }
+    return null;
+  }
+
+  private async saveAppBD(infoApp: CreateAplicacionDto, idu_proyecto: string, appName: string,nom_dir:string, idu_usuario: number){
+    const sourcecode = this.sourceCodeRepository.create({
+      nom_codigo_fuente: this.encryptionService.encrypt(appName),
+      nom_directorio: this.encryptionService.encrypt(nom_dir),
+    });
+
+    try { 
+      await this.sourceCodeRepository.save(sourcecode);
+
+    }catch(error) {
+      this.handleError('saveAppBD','Error al guardar sourcecode en BD', error);
+    }
+
+    let estatu = await this.appStatusRepository.findOneBy({ idu_estatus_aplicacion: 2 });  
+    if(!estatu){
+      this.handleError(
+        'saveAppBD', 
+        `Status ${ 2 } no encontrado`, 
+        new Error('Status no encontrado')
+      )
+    }
+
+    estatu.des_estatus_aplicacion = this.encryptionService.decrypt(estatu.des_estatus_aplicacion);  
+    const aplicacion = new Aplicacion();
+    
+    try {
+      const opciones = infoApp.opc_arquitectura;
+
+      aplicacion.nom_aplicacion = this.encryptionService.encrypt(appName);
+      aplicacion.idu_proyecto = idu_proyecto;
+      aplicacion.num_accion = infoApp.num_accion;
+      aplicacion.opc_arquitectura = infoApp.opc_arquitectura || {"1": false, "2": false, "3": false, "4": false};
+      aplicacion.opc_lenguaje = infoApp.opc_lenguaje;
+      aplicacion.opc_estatus_doc = opciones['1'] ? 2 : 0;
+      aplicacion.opc_estatus_doc_code = opciones['2'] ? 2 : 0;
+      aplicacion.opc_estatus_caso = opciones['3'] ? 2 : 0;
+      aplicacion.opc_estatus_calificar = opciones['4'] ? 2 : 0;
+      aplicacion.applicationstatus = estatu;
+      aplicacion.sourcecode = sourcecode;
+      aplicacion.idu_usuario = idu_usuario;
+      
+    }catch(error) {
+      this.handleError('processRepository','Error al guardar aplicacion en BD', error);
+    } 
+
+    await this.appRepository.save(aplicacion);
+    return aplicacion;
+  }
+  
+  private async initProcessRVIA(data: DataToMS, aplicacion: Aplicacion, num_accion: number){
+    let rviaProcess: ResponseProcess = { isProcessStarted: false, message: 'Error al crear el app y num_accion' };
+
+    if(num_accion === NumberAction.UPDATECODE){
+      data.num_accion = NumberAction.UPDATECODE;
+      rviaProcess = await this.initUpdateCode(data);
+    }
+
+    if(num_accion === NumberAction.SANITIZECODE){
+      
+      let pdfProcess;
+      // TODO llamar ms para guardar pdf
+      // if(pdfFile){
+      //   pdfProcess = await this.saveDocument(pdfFile,idu_proyecto);
+      //   console.log(rviaProcess);
+      // } else {
+
+      //   this.handleError(
+      //     'createAppWithFiles', 
+      //     `Error al guardar el pdf de sanitización`, 
+      //     new Error('pdf no encontrado')
+      //   )
+      //   let rviaProcess = { isProcessStarted: false, message: 'Error al crear el app y no se tiene pdf' };      
+      // }
+
+      // TODO llamar al ms de sanitización
+      // if(pdfProcess.isProcessStarted){
+        // dataToProcess.num_accion = NumberAction.SANITIZECODE;
+        // rviaProcess = await this.initSanitizeCode(dataToProcess);
+        // console.log(rviaProcess);
+      // }
+    }
+
+    if(num_accion === NumberAction.MIGRATIONCODE){
+      data.num_accion = NumberAction.MIGRATIONCODE;
+      rviaProcess = await this.initMigrationCode(data);
+    }
+    
+    aplicacion.nom_aplicacion = this.encryptionService.decrypt(aplicacion.nom_aplicacion);
+
     return {
       aplicacion,
       rviaProcess
     }
+
   }
 
-  async initUpdateCode(data: DataToMS){
+  private async initUpdateCode(data: DataToMS){
     return lastValueFrom(this.rviaacClient.send('createActualizacion', { ...data }));
   }
 
-  async saveDocument(file: fileRVIA, idu_aplicacion: number){
-    // return lastValueFrom(this.client.send('', { }));
+  private async saveDocument(file: fileRVIA, idu_aplicacion: number){
+    return lastValueFrom(this.rviadocClient.send('rviadoc.find_one', {id: idu_aplicacion} ));
   }
 
-  async initSanitizeCode(idu_aplicacion: number, nomDir: string){
-    // return lastValueFrom(this.client.send('', { }));
+  private async initSanitizeCode(data: DataToMS){
+    return lastValueFrom(this.rviasaClient.send('createSanitizacion', {...data }));
   }
 
-  async initMigrationCode(data: DataToMS){
+  private async initMigrationCode(data: DataToMS){
     return lastValueFrom(this.rviamiClient.send('rvia.migracion.proyecto', { ...data }));
   }
   
