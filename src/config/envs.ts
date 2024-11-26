@@ -10,8 +10,12 @@ interface EnvVars {
   DB_PORT: number;
 
   APP_MS_PORT: number;
-  UPDATE_MS_PORT: number;
-  UPDATE_MS_HOST:string;
+  MS_HOST:string;
+
+  RVIAAC_MICROSERVICE_PORT: number;
+  RVIASA_MICROSERVICE_PORT: number;
+  RVIAMI_MICROSERVICE_PORT: number;
+  RVIADOC_MICROSERVICE_PORT: number;
 
   PATH_PROJECTS: string; 
   RVIA_ENVIRONMENT: number;
@@ -26,8 +30,12 @@ const envsSchema = joi.object({
   DB_PORT: joi.number().required(),
 
   APP_MS_PORT: joi.number().required(),
-  UPDATE_MS_PORT: joi.number().required(),
-  UPDATE_MS_HOST: joi.string().required(),
+  MS_HOST: joi.string().required(),
+
+  RVIAAC_MICROSERVICE_PORT: joi.number().required(),
+  RVIASA_MICROSERVICE_PORT: joi.number().required(),
+  RVIAMI_MICROSERVICE_PORT: joi.number().required(),
+  RVIADOC_MICROSERVICE_PORT: joi.number().required(),
 
   PATH_PROJECTS: joi.string().required(), 
   RVIA_ENVIRONMENT: joi.number().required(),
@@ -52,8 +60,12 @@ export const envs = {
   dbPort: envVars.DB_PORT,
 
   apps_ms_port:  envVars.APP_MS_PORT,
-  update_ms_port: envVars.UPDATE_MS_PORT,
-  update_ms_host: envVars.UPDATE_MS_HOST,
+  ms_host: envVars.MS_HOST,
+
+  rviaac_ms_port: envVars.RVIAAC_MICROSERVICE_PORT,
+  rviasa_ms_port: envVars.RVIASA_MICROSERVICE_PORT,
+  rviami_ms_port: envVars.RVIAMI_MICROSERVICE_PORT,
+  rviadoc_ms_port: envVars.RVIADOC_MICROSERVICE_PORT,
   
   path_projects: envVars.PATH_PROJECTS,
   rvia_environment: envVars.RVIA_ENVIRONMENT,

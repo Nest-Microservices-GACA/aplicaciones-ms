@@ -1,8 +1,9 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ClientProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
 import { RpcException } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { lastValueFrom } from 'rxjs';
 
 import { Repository } from 'typeorm';
 import { join } from 'path';
@@ -11,16 +12,13 @@ import * as unzipper from 'unzipper';
 import * as seven from '7zip-min';
 
 import { CreateAplicacionDto, User } from './dto';
-import { Aplicacion, Aplicacionstatus } from './entities';
+import { Aplicacion, Aplicacionstatus, Sourcecode } from './entities';
 import { CommonService } from '../common/common.service';
-import { fileRVIA, NumberAction } from './interfaces';
-import { envs } from '../config';
-import { lastValueFrom } from 'rxjs';
-
+import { DataToMS, fileRVIA, NumberAction, ResponseProcess } from './interfaces';
+import { envs, RVIAAC_SERVICE, RVIAMI_SERVICE } from '../config';
 
 @Injectable()
-export class AplicacionesService implements OnModuleInit {
-  private client: ClientProxy;
+export class AplicacionesService {
   private readonly logger = new Logger('AplicationService');
   private readonly crviaEnvironment: number;
   private readonly addon: any;
@@ -28,28 +26,19 @@ export class AplicacionesService implements OnModuleInit {
   constructor(
     @InjectRepository(Aplicacion)
     private readonly appRepository: Repository<Aplicacion>,
-    private readonly encryptionService: CommonService,
     @InjectRepository(Aplicacionstatus)
     private readonly appStatusRepository: Repository<Aplicacionstatus>, 
-    private readonly configService: ConfigService
+    @InjectRepository(Sourcecode)
+    private readonly sourceCodeRepository: Repository<Sourcecode>,
+    private readonly encryptionService: CommonService,
+    private readonly configService: ConfigService,
+    @Inject(RVIAMI_SERVICE) private readonly rviamiClient: ClientProxy,
+    @Inject(RVIAAC_SERVICE) private readonly rviaacClient: ClientProxy,
   ){
     const rviaPath = this.configService.get<string>('RVIA_PATH');
-    if (!rviaPath) {
-      throw new Error('La variable de entorno RVIA_PATH no está definida');
-    }
-
+  
     this.addon = require(rviaPath);
     this.crviaEnvironment = Number(this.configService.get('RVIA_ENVIRONMENT'));
-  }
-
-  onModuleInit() {
-    this.client = ClientProxyFactory.create({
-      transport: Transport.TCP,
-      options: {
-        host: this.configService.get<string>('UPDATE_MS_HOST'),
-        port: this.configService.get<number>('UPDATE_MS_PORT'),
-      },
-    });
   }
 
   async findAll(user: User) {
@@ -133,20 +122,19 @@ export class AplicacionesService implements OnModuleInit {
 
   async createAppWithFiles(createAplicacionDto: CreateAplicacionDto, zipFile: fileRVIA, pdfFile: fileRVIA, user: User ){
 
-    console.log(createAplicacionDto);
     const obj = this.addon.CRvia(this.crviaEnvironment);
-    const iduProject = obj.createIDProject();
-    console.log('id: ' + iduProject);
+    const idu_proyecto = obj.createIDProject();
     const fileParts = zipFile.originalname.split('.');
     const fileExtension = fileParts.pop();
     const dirName = envs.path_projects;
-    const appName = iduProject + '_' + fileParts.join('.').replace(/\s+/g, '-');
+    const appName = fileParts.join('.').replace(/\s+/g, '-');
+    const appNameWIdu = idu_proyecto + '_' + appName ;
     
-    const zipFilePath = join(dirName, `${appName}.${fileExtension}`);
+    const zipFilePath = join(dirName, `${appNameWIdu}.${fileExtension}`);
     const zipBuffer = Buffer.from(zipFile.buffer.data);
     fs.writeFileSync(zipFilePath, zipBuffer);
     
-    const extractPath = join(dirName, appName);
+    const extractPath = join(dirName, appNameWIdu);
     fs.mkdirSync(extractPath, { recursive: true });
     if (zipFile.mimetype === 'application/zip' || zipFile.mimetype === 'application/x-zip-compressed') {
       await fs.createReadStream(zipFilePath)
@@ -168,41 +156,98 @@ export class AplicacionesService implements OnModuleInit {
       });
     }
 
+    const sourcecode = this.sourceCodeRepository.create({
+      nom_codigo_fuente: this.encryptionService.encrypt(appName),
+      nom_directorio: this.encryptionService.encrypt(extractPath),
+    });
+    
+    try { 
+      await this.sourceCodeRepository.save(sourcecode);
+
+    }catch(error) {
+      this.handleError('createAppWithFiles','Error al guardar sourcecode en BD', error);
+    }
+
+    let estatu = await this.appStatusRepository.findOneBy({ idu_estatus_aplicacion: 2 });  
+    if(!estatu){
+      this.handleError(
+        'updateStatusApp', 
+        `Status ${ 2 } no encontrado`, 
+        new Error('Status no encontrado')
+      )
+    }
+
+    estatu.des_estatus_aplicacion = this.encryptionService.decrypt(estatu.des_estatus_aplicacion);
+    
+    const aplicacion = new Aplicacion();
+
+    try {
+      const opciones = createAplicacionDto.opc_arquitectura;
+
+      aplicacion.nom_aplicacion = this.encryptionService.encrypt(appName);
+      aplicacion.idu_proyecto = idu_proyecto;
+      aplicacion.num_accion = createAplicacionDto.num_accion;
+      aplicacion.opc_arquitectura = createAplicacionDto.opc_arquitectura || {"1": false, "2": false, "3": false, "4": false};
+      aplicacion.opc_lenguaje = createAplicacionDto.opc_lenguaje;
+      aplicacion.opc_estatus_doc = opciones['1'] ? 2 : 0;
+      aplicacion.opc_estatus_doc_code = opciones['2'] ? 2 : 0;
+      aplicacion.opc_estatus_caso = opciones['3'] ? 2 : 0;
+      aplicacion.opc_estatus_calificar = opciones['4'] ? 2 : 0;
+      aplicacion.applicationstatus = estatu;
+      aplicacion.sourcecode = sourcecode;
+      aplicacion.idu_usuario = user.idu_usuario;
+      
+    }catch(error) {
+      this.handleError('createAppWithFiles','Error al guardar aplicacion en BD', error);
+    } 
+
+    await this.appRepository.save(aplicacion);
+
+    const dataToProcess = { 
+      idu_proyecto,
+      num_accion: 0,
+      numero_empleado: user.numero_empleado,
+      path_project: extractPath
+    }
+    
+    let rviaProcess = { isProcessStarted: false, message: 'Error al crear el app y num_accion' };
+
     if(createAplicacionDto.num_accion === NumberAction.UPDATECODE){
-      // TODO llamar al ms de actualización
-      // const result = await this.initUpdateCode(iduProject,appName);
-      // console.log(result);
+      dataToProcess.num_accion = NumberAction.UPDATECODE;
+      rviaProcess = await this.initUpdateCode(dataToProcess);
     }
 
-    if(createAplicacionDto.num_accion === NumberAction.SANITIZECODE){
-      // TODO llamar ms para guardar pdf
-      // TODO llamar al ms de sanitización
+    // if(createAplicacionDto.num_accion === NumberAction.SANITIZECODE){
+    //   // TODO llamar ms para guardar pdf
+    //   // TODO llamar al ms de sanitización
 
-    }
+    // }
 
     if(createAplicacionDto.num_accion === NumberAction.MIGRATIONCODE){
-      // TODO llamar al ms de migración
+      dataToProcess.num_accion = NumberAction.MIGRATIONCODE;
+      rviaProcess = await this.initMigrationCode(dataToProcess);
     }
-
     
-
-    return 'Aqui crearemos una app'
+    return {
+      aplicacion,
+      rviaProcess
+    }
   }
 
-  async initUpdateCode(idu_aplicacion: number, nomDir: string){
-    return lastValueFrom(this.client.send('', { }));
+  async initUpdateCode(data: DataToMS){
+    return lastValueFrom(this.rviaacClient.send('createActualizacion', { ...data }));
   }
 
   async saveDocument(file: fileRVIA, idu_aplicacion: number){
-    return lastValueFrom(this.client.send('', { }));
+    // return lastValueFrom(this.client.send('', { }));
   }
 
   async initSanitizeCode(idu_aplicacion: number, nomDir: string){
-    return lastValueFrom(this.client.send('', { }));
+    // return lastValueFrom(this.client.send('', { }));
   }
 
-  async initMigrationCode(idu_aplicacion: number, nomDir: string){
-    return lastValueFrom(this.client.send('', { }));
+  async initMigrationCode(data: DataToMS){
+    return lastValueFrom(this.rviamiClient.send('rvia.migracion.proyecto', { ...data }));
   }
   
   private handleError(method:string, message: string, error: any){
