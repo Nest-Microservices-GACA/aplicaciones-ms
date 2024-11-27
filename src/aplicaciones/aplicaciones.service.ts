@@ -2,7 +2,7 @@ import { catchError, lastValueFrom } from 'rxjs';
 import { ClientProxy } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, InternalServerErrorException, Logger, NotFoundException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { join } from 'path'; 
 import { pipeline } from 'stream';
@@ -48,7 +48,7 @@ export class AplicacionesService {
   async findAll(user: User) {
     try{
 
-      const queryBuilder = this.appRepository.createQueryBuilder('application')
+      const queryBuilder = this.appRepository.createQueryBuilder('applicationn')
       .leftJoinAndSelect('application.checkmarx', 'checkmarx')
       .leftJoinAndSelect('application.sourcecode', 'sourcecode')
       .orderBy('application.fec_creacion', 'ASC');
@@ -74,12 +74,7 @@ export class AplicacionesService {
       return { aplicaciones, total: aplicaciones.length };
 
     } catch (error) {
-      return this.handleError(
-        'findAll', 
-        500,
-        'Hubo un error consultando apps',
-        error
-      );
+      this.handleError('findAll',error);
     }
   }
 
@@ -93,20 +88,16 @@ export class AplicacionesService {
 
       if (!app){
         this.handleError(
-          'updateStatusApp',
-          500, 
-          `App ${ idu_aplicacion } no encontrado`, 
-          new Error('App no encontrado')
+          'updateStatusApp', 
+          new NotFoundException('Aplicación no encontrada')
         )
       }
       
       const newStatus = await this.appStatusRepository.findOneBy({ idu_estatus_aplicacion: newStatusId });
       if(!newStatus){
-        return this.handleError(
+        this.handleError(
           'updateStatusApp', 
-          500,
-          `Status ${ newStatusId } no encontrado`, 
-          new Error('Status no encontrado')
+          new NotFoundException('Status no encontrado')
         )
       }
 
@@ -117,10 +108,8 @@ export class AplicacionesService {
       return app;
       
     } catch (error) {
-      return this.handleError(
+      this.handleError(
         'updateStatusApp', 
-        500,
-        `Hubo un error actualizando estado de app ${idu_aplicacion}`, 
         error
       );
     }
@@ -150,20 +139,36 @@ export class AplicacionesService {
           .promise()
           .then(() => {})
           .catch(error => {
-            this.handleError('createAppWithFiles', 500, 'Error al descomprimir el archivo .zip', error);
+            this.handleError(
+              'createAppWithFiles', 
+              new InternalServerErrorException(`Error al descomprimir el archivo .zip: ${error.message}`)
+            )
           });
       } else if (zipFile.mimetype === 'application/x-7z-compressed') {
         await new Promise<void>((resolve, reject) => {
           seven.unpack(zipFilePath, extractPath, error => {
             if (error) {
-              reject(this.handleError('createAppWithFiles', 500, 'Error al descomprimir el archivo .7z', error));
+              reject(
+                this.handleError(
+                  'createAppWithFiles', 
+                  new InternalServerErrorException(`Error al descomprimir el archivo .7z: ${error.message}`)
+                )
+              );
             }
             resolve();
           });
         });
+      } else {
+        this.handleError(
+          'createAppWithFiles', 
+          new UnsupportedMediaTypeException('Formato de archivo no soportado')
+        );
       }
     } catch (error) {
-      this.handleError('createAppWithFiles', 500,'Error durante la descompresión', error);
+      this.handleError(
+        'createAppWithFiles', 
+        new InternalServerErrorException(`Error al descomprimir el archivo: ${error.message}`)
+      );
     }
 
     const aplicacion = await this.saveAppBD(createAplicacionDto, idu_proyecto, appName, extractPath, user.idu_usuario);
@@ -182,13 +187,16 @@ export class AplicacionesService {
     try {
       const repoInfo = this.parseGitHubURL(createAplicacionDto.url);
       if (!repoInfo) {
-        this.handleError('createAppWithGit',500,'paserGitHubURL', new Error('Invalid GitHub repository URL'));
+        this.handleError(
+          'createAppWithGit', 
+          new BadRequestException('URL invalida de repositorio de GitHub')
+        );
       }
 
       return await this.processRepository(repoInfo.repoName, repoInfo.userName, user, createAplicacionDto ,pdfFile,  'GitHub');
 
     } catch (error) {
-      return this.handleError('createAppWithGit',500,'Error al crear app con github', error);
+      return this.handleError('createAppWithGit', error);
     }
   }
 
@@ -221,7 +229,10 @@ export class AplicacionesService {
     }
 
     if (!zipUrl) {
-      return this.handleError('processRepository',500,'Error al crear app con github', new Error('No se encontró ninguna rama válida (main o master)'));
+      this.handleError(
+        'processRepository',
+        new BadRequestException('No se encontró ninguna rama válida (main o master)')
+      );
     }
 
     const response = await lastValueFrom(
@@ -233,13 +244,15 @@ export class AplicacionesService {
     );
 
     if (response.length === 0) {
-      return this.handleError('processRepository',500, 'Error al descargar el repositorio', new Error('Error al descargar el repositorio'));
+      this.handleError(
+        'processRepository', 
+        new InternalServerErrorException('Error al descargar el repositorio')
+      );
     }
 
     try {
 
       await streamPipeline(response.data, fs.createWriteStream(repoFolderPath));
-      console.log(appNameWIdu);
       const tempFolderPath = join(dirName, `temp-${appNameWIdu}`);
       
       await unzipper.Open.file(repoFolderPath)
@@ -267,8 +280,10 @@ export class AplicacionesService {
     } catch (error) {
       await fsExtra.remove(finalFolder);
       await fsExtra.remove(repoFolderPath);
-      return this.handleError('processRepository',500,'Error al procesar el repositorio', error);
-
+      return this.handleError(
+        'processRepository', 
+        new InternalServerErrorException(`Error al procesar el repositorio: ${error.message}`)
+      );
     }
     
   }
@@ -287,21 +302,22 @@ export class AplicacionesService {
       nom_codigo_fuente: this.encryptionService.encrypt(appName),
       nom_directorio: this.encryptionService.encrypt(nom_dir),
     });
-
+    
     try { 
       await this.sourceCodeRepository.save(sourcecode);
 
     }catch(error) {
-      this.handleError('saveAppBD',500,'Error al guardar sourcecode en BD', error);
+      this.handleError(
+        'saveAppBD',
+        new InternalServerErrorException(`Error al guardar el código fuente: ${error.message}`) 
+      );
     }
 
     let estatu = await this.appStatusRepository.findOneBy({ idu_estatus_aplicacion: 2 });  
     if(!estatu){
       this.handleError(
         'saveAppBD', 
-        500,
-        `Status ${ 2 } no encontrado`, 
-        new Error('Status no encontrado')
+        new NotFoundException('Status no encontrado')
       )
     }
 
@@ -325,7 +341,10 @@ export class AplicacionesService {
       aplicacion.idu_usuario = idu_usuario;
       
     }catch(error) {
-      this.handleError('processRepository',500,'Error al guardar aplicacion en BD', error);
+      this.handleError(
+        'processRepository', 
+        new InternalServerErrorException(`Error al guardar la aplicación: ${error.message}`)
+      );
     } 
 
     await this.appRepository.save(aplicacion);
@@ -411,11 +430,33 @@ export class AplicacionesService {
     }
   }
   
-  private handleError(method:string, status: number, message: string, error: any){
-    this.logger.error(`[aplicaciones.${ method }.service]`,error);
+  private handleError(method:string, error: any){
+    this.logger.error(`[aplicaciones.${ method }]`,error);
+
+    if (error.code === '23505'){
+      throw new RpcException({
+        status: 400,
+        message: error.detail,
+      });
+    }
+
+    if (error.response){
+      throw new RpcException({
+        status: 400,
+        message: error.message,
+      });
+    }
+
+    if(error.error){
+      throw new RpcException({
+        status: error.error.status,
+        message: error.error.message,
+      });  
+    }
+
     throw new RpcException({
-      status,
-      message: `${message}: ${error}`,
+      status: 500,
+      message: 'Error en el servidor',
     });
   }
 }
