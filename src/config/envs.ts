@@ -10,12 +10,7 @@ interface EnvVars {
   DB_PORT: number;
 
   APP_MS_PORT: number;
-  MS_HOST:string;
-
-  RVIAAC_MICROSERVICE_PORT: number;
-  RVIASA_MICROSERVICE_PORT: number;
-  RVIAMI_MICROSERVICE_PORT: number;
-  RVIADOC_MICROSERVICE_PORT: number;
+  NATS_SERVERS: string[];
 
   PATH_PROJECTS: string; 
   RVIA_ENVIRONMENT: number;
@@ -30,12 +25,7 @@ const envsSchema = joi.object({
   DB_PORT: joi.number().required(),
 
   APP_MS_PORT: joi.number().required(),
-  MS_HOST: joi.string().required(),
-
-  RVIAAC_MICROSERVICE_PORT: joi.number().required(),
-  RVIASA_MICROSERVICE_PORT: joi.number().required(),
-  RVIAMI_MICROSERVICE_PORT: joi.number().required(),
-  RVIADOC_MICROSERVICE_PORT: joi.number().required(),
+  NATS_SERVERS: joi.array().items( joi.string() ).required(),
 
   PATH_PROJECTS: joi.string().required(), 
   RVIA_ENVIRONMENT: joi.number().required(),
@@ -43,8 +33,10 @@ const envsSchema = joi.object({
 })
 .unknown(true);
 
-const { error, value } = envsSchema.validate( process.env );
-
+const { error, value } = envsSchema.validate({
+  ...process.env,
+  NATS_SERVERS: process.env.NATS_SERVERS?.split(',')
+});
 
 if ( error ) {
   throw new Error(`Config validation error: ${ error.message }`);
@@ -60,12 +52,7 @@ export const envs = {
   dbPort: envVars.DB_PORT,
 
   apps_ms_port:  envVars.APP_MS_PORT,
-  ms_host: envVars.MS_HOST,
-
-  rviaac_ms_port: envVars.RVIAAC_MICROSERVICE_PORT,
-  rviasa_ms_port: envVars.RVIASA_MICROSERVICE_PORT,
-  rviami_ms_port: envVars.RVIAMI_MICROSERVICE_PORT,
-  rviadoc_ms_port: envVars.RVIADOC_MICROSERVICE_PORT,
+  natsServers: envVars.NATS_SERVERS,
   
   path_projects: envVars.PATH_PROJECTS,
   rvia_environment: envVars.RVIA_ENVIRONMENT,
