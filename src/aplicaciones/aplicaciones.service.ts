@@ -48,7 +48,7 @@ export class AplicacionesService {
   async findAll(user: User) {
     try{
 
-      const queryBuilder = this.appRepository.createQueryBuilder('applicationn')
+      const queryBuilder = this.appRepository.createQueryBuilder('application')
       .leftJoinAndSelect('application.checkmarx', 'checkmarx')
       .leftJoinAndSelect('application.sourcecode', 'sourcecode')
       .orderBy('application.fec_creacion', 'ASC');
@@ -196,7 +196,25 @@ export class AplicacionesService {
       return await this.processRepository(repoInfo.repoName, repoInfo.userName, user, createAplicacionDto ,pdfFile,  'GitHub');
 
     } catch (error) {
-      return this.handleError('createAppWithGit', error);
+      this.handleError('createAppWithGit', error);
+    }
+  }
+
+  async createAppWithGitLab(createAplicacionDto: CreateAplicacionUrlDto, user: User, pdfFile: fileRVIA){
+
+    try {
+      const repoInfo = this.getRepoInfo(createAplicacionDto.url);
+      if (!repoInfo) {
+        this.handleError(
+          'createAppWithGit', 
+          new BadRequestException('URL invalida de repositorio de GitLab')
+        );
+      }
+
+      return await this.processRepository(repoInfo.repoName, `${repoInfo.userName}/${repoInfo.groupName}`, user, createAplicacionDto , pdfFile, 'GitLab');
+
+    } catch (error) {
+      this.handleError('createAppWithGit', error);
     }
   }
 
@@ -294,6 +312,30 @@ export class AplicacionesService {
     if (match) {
       return { userName: match[1], repoName: match[2] };
     }
+    return null;
+  }
+
+  private getRepoInfo(url: string): { userName: string, groupName: string, repoName: string } | null {
+    try {
+      const { pathname } = new URL(url);
+
+      const pathSegments = pathname.split('/').filter(segment => segment);
+
+      if (pathSegments.length > 0 && pathSegments[pathSegments.length - 1].endsWith('.git')) {
+        const repoName = pathSegments.pop()!.replace('.git', '');
+        const groupName = pathSegments.pop()!;
+        const userName = pathSegments.join('/');
+
+        return {
+          userName,
+          groupName,
+          repoName
+        };
+      }
+    } catch (error) {
+      
+    }
+
     return null;
   }
 
