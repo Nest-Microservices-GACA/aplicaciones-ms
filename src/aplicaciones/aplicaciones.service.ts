@@ -19,7 +19,7 @@ import { Aplicacion, Aplicacionstatus, Sourcecode } from './entities';
 import { CommonService } from '../common/common.service';
 import { CreateAplicacionDto, CreateAplicacionUrlDto, User } from './dto';
 import { DataToMS, fileRVIA, NumberAction, ResponseProcess } from './interfaces';
-import { envs, RVIAAC_SERVICE, RVIADOC_SERVICE, RVIAMI_SERVICE, RVIASA_SERVICE } from '../config';
+import { envs, NATS_SERVICE } from '../config';
 
 @Injectable()
 export class AplicacionesService {
@@ -37,10 +37,7 @@ export class AplicacionesService {
     private readonly encryptionService: CommonService,
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
-    @Inject(RVIAMI_SERVICE)  private readonly rviamiClient:  ClientProxy,
-    @Inject(RVIAAC_SERVICE)  private readonly rviaacClient:  ClientProxy,
-    @Inject(RVIADOC_SERVICE) private readonly rviadocClient: ClientProxy,
-    @Inject(RVIASA_SERVICE)  private readonly rviasaClient:  ClientProxy,
+    @Inject(NATS_SERVICE)  private readonly client:  ClientProxy,
   ){
     const rviaPath = this.configService.get<string>('RVIA_PATH');
   
@@ -56,7 +53,7 @@ export class AplicacionesService {
       .leftJoinAndSelect('application.sourcecode', 'sourcecode')
       .orderBy('application.fec_creacion', 'ASC');
 
-      if (user.position?.idu_rol !== 1) {
+      if (user.rol?.idu_rol !== 1) {
         queryBuilder.where('application.idu_usuario = :userId', { userId: user.idu_usuario });
       }
 
@@ -79,6 +76,7 @@ export class AplicacionesService {
     } catch (error) {
       return this.handleError(
         'findAll', 
+        500,
         'Hubo un error consultando apps',
         error
       );
@@ -95,7 +93,8 @@ export class AplicacionesService {
 
       if (!app){
         this.handleError(
-          'updateStatusApp', 
+          'updateStatusApp',
+          500, 
           `App ${ idu_aplicacion } no encontrado`, 
           new Error('App no encontrado')
         )
@@ -105,6 +104,7 @@ export class AplicacionesService {
       if(!newStatus){
         return this.handleError(
           'updateStatusApp', 
+          500,
           `Status ${ newStatusId } no encontrado`, 
           new Error('Status no encontrado')
         )
@@ -119,6 +119,7 @@ export class AplicacionesService {
     } catch (error) {
       return this.handleError(
         'updateStatusApp', 
+        500,
         `Hubo un error actualizando estado de app ${idu_aplicacion}`, 
         error
       );
@@ -149,20 +150,20 @@ export class AplicacionesService {
           .promise()
           .then(() => {})
           .catch(error => {
-            this.handleError('createAppWithFiles', 'Error al descomprimir el archivo .zip', error);
+            this.handleError('createAppWithFiles', 500, 'Error al descomprimir el archivo .zip', error);
           });
       } else if (zipFile.mimetype === 'application/x-7z-compressed') {
         await new Promise<void>((resolve, reject) => {
           seven.unpack(zipFilePath, extractPath, error => {
             if (error) {
-              reject(this.handleError('createAppWithFiles', 'Error al descomprimir el archivo .7z', error));
+              reject(this.handleError('createAppWithFiles', 500, 'Error al descomprimir el archivo .7z', error));
             }
             resolve();
           });
         });
       }
     } catch (error) {
-      this.handleError('createAppWithFiles', 'Error durante la descompresión', error);
+      this.handleError('createAppWithFiles', 500,'Error durante la descompresión', error);
     }
 
     const aplicacion = await this.saveAppBD(createAplicacionDto, idu_proyecto, appName, extractPath, user.idu_usuario);
@@ -181,13 +182,13 @@ export class AplicacionesService {
     try {
       const repoInfo = this.parseGitHubURL(createAplicacionDto.url);
       if (!repoInfo) {
-        this.handleError('createAppWithGit','paserGitHubURL', new Error('Invalid GitHub repository URL'));
+        this.handleError('createAppWithGit',500,'paserGitHubURL', new Error('Invalid GitHub repository URL'));
       }
 
       return await this.processRepository(repoInfo.repoName, repoInfo.userName, user, createAplicacionDto ,pdfFile,  'GitHub');
 
     } catch (error) {
-      return this.handleError('createAppWithGit','Error al crear app con github', error);
+      return this.handleError('createAppWithGit',500,'Error al crear app con github', error);
     }
   }
 
@@ -220,7 +221,7 @@ export class AplicacionesService {
     }
 
     if (!zipUrl) {
-      return this.handleError('processRepository','Error al crear app con github', new Error('No se encontró ninguna rama válida (main o master)'));
+      return this.handleError('processRepository',500,'Error al crear app con github', new Error('No se encontró ninguna rama válida (main o master)'));
     }
 
     const response = await lastValueFrom(
@@ -232,7 +233,7 @@ export class AplicacionesService {
     );
 
     if (response.length === 0) {
-      return this.handleError('processRepository', 'Error al descargar el repositorio', new Error('Error al descargar el repositorio'));
+      return this.handleError('processRepository',500, 'Error al descargar el repositorio', new Error('Error al descargar el repositorio'));
     }
 
     try {
@@ -266,7 +267,7 @@ export class AplicacionesService {
     } catch (error) {
       await fsExtra.remove(finalFolder);
       await fsExtra.remove(repoFolderPath);
-      return this.handleError('processRepository','Error al procesar el repositorio', error);
+      return this.handleError('processRepository',500,'Error al procesar el repositorio', error);
 
     }
     
@@ -291,13 +292,14 @@ export class AplicacionesService {
       await this.sourceCodeRepository.save(sourcecode);
 
     }catch(error) {
-      this.handleError('saveAppBD','Error al guardar sourcecode en BD', error);
+      this.handleError('saveAppBD',500,'Error al guardar sourcecode en BD', error);
     }
 
     let estatu = await this.appStatusRepository.findOneBy({ idu_estatus_aplicacion: 2 });  
     if(!estatu){
       this.handleError(
         'saveAppBD', 
+        500,
         `Status ${ 2 } no encontrado`, 
         new Error('Status no encontrado')
       )
@@ -323,7 +325,7 @@ export class AplicacionesService {
       aplicacion.idu_usuario = idu_usuario;
       
     }catch(error) {
-      this.handleError('processRepository','Error al guardar aplicacion en BD', error);
+      this.handleError('processRepository',500,'Error al guardar aplicacion en BD', error);
     } 
 
     await this.appRepository.save(aplicacion);
@@ -378,25 +380,41 @@ export class AplicacionesService {
   }
 
   private async initUpdateCode(data: DataToMS){
-    return lastValueFrom(this.rviaacClient.send('createActualizacion', { ...data }));
+    try {
+      return await lastValueFrom(this.client.send('createActualizacion', { ...data }));
+    } catch (error) {
+      return { isProcessStarted: false, message: `Error iniciando el proceso de actualización: ${error}` };
+    }
   }
 
   private async saveDocument(file: fileRVIA, idu_aplicacion: number){
-    return lastValueFrom(this.rviadocClient.send('rviadoc.find_one', {id: idu_aplicacion} ));
+    try{
+      return lastValueFrom(this.client.send('rviadoc.find_one', {id: idu_aplicacion} ));
+    } catch (error) {
+      return { isProcessStarted: false, message: `Error al guardar el documento: ${error}` };
+    }
   }
 
   private async initSanitizeCode(data: DataToMS){
-    return lastValueFrom(this.rviasaClient.send('createSanitizacion', {...data }));
+    try{
+      return lastValueFrom(this.client.send('createSanitizacion', {...data }));
+    } catch (error) {
+      return { isProcessStarted: false, message: `Error iniciando el proceso de sanitización: ${error}` };
+    }
   }
 
   private async initMigrationCode(data: DataToMS){
-    return lastValueFrom(this.rviamiClient.send('rvia.migracion.proyecto', { ...data }));
+    try{
+      return lastValueFrom(this.client.send('rvia.migracion.proyecto', { ...data }));
+    } catch (error) {
+      return { isProcessStarted: false, message: `Error iniciando el proceso de migración: ${error}` }; 
+    }
   }
   
-  private handleError(method:string, message: string, error: any){
+  private handleError(method:string, status: number, message: string, error: any){
     this.logger.error(`[aplicaciones.${ method }.service]`,error);
     throw new RpcException({
-      status: 'Error',
+      status,
       message: `${message}: ${error}`,
     });
   }

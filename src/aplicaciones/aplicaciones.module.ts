@@ -7,7 +7,7 @@ import { Aplicacion, Aplicacionstatus, Checkmarx, Scan, Sourcecode } from './ent
 import { AplicacionesController } from './aplicaciones.controller';
 import { AplicacionesService } from './aplicaciones.service';
 import { CommonModule } from '../common/common.module';
-import { envs, RVIAAC_SERVICE, RVIADOC_SERVICE, RVIAMI_SERVICE, RVIASA_SERVICE } from '../config';
+import { envs, NATS_SERVICE } from '../config';
 
 @Module({
   controllers: [AplicacionesController],
@@ -22,37 +22,12 @@ import { envs, RVIAAC_SERVICE, RVIADOC_SERVICE, RVIAMI_SERVICE, RVIASA_SERVICE }
     ]),
     ClientsModule.register([
       { 
-        name: RVIAAC_SERVICE, 
-        transport: Transport.TCP,
+        name: NATS_SERVICE, 
+        transport: Transport.NATS,
         options: {
-          host: envs.ms_host,
-          port: envs.rviaac_ms_port
+          servers: envs.natsServers
         }
       },
-      {
-        name: RVIASA_SERVICE, 
-        transport: Transport.TCP,
-        options: {
-          host: envs.ms_host,
-          port: envs.rviasa_ms_port
-        }
-      },
-      {
-        name: RVIAMI_SERVICE, 
-        transport: Transport.TCP,
-        options: {
-          host: envs.ms_host,
-          port: envs.rviami_ms_port
-        }
-      },
-      {
-        name: RVIADOC_SERVICE, 
-        transport: Transport.TCP,
-        options: {
-          host: envs.ms_host,
-          port: envs.rviadoc_ms_port
-        }
-      }
     ]),
     CommonModule,
     HttpModule,

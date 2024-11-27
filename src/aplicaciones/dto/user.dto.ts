@@ -22,10 +22,10 @@ export class User {
     @IsString()
     nom_usuario: string;
   
-    @IsBoolean()
-    esactivo: boolean;
-  
+    @IsNumber()
+    idu_rol: number;
+
     @ValidateNested()
     @Type(() => Position)
-    position: Position;
+    rol: Position;
 }
