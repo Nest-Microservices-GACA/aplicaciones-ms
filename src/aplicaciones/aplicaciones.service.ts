@@ -78,6 +78,39 @@ export class AplicacionesService {
     }
   }
 
+  async findOne(idu_proyecto: number) {
+    try{
+
+      const queryBuilder = this.appRepository.createQueryBuilder('application')
+      .leftJoinAndSelect('application.checkmarx', 'checkmarx')
+      .leftJoinAndSelect('application.sourcecode', 'sourcecode')
+      .where('application.idu_proyecto = :idu_proyecto', { idu_proyecto });
+
+      const app = await queryBuilder.getOne();
+
+      if(!app){
+        this.handleError(
+          'findOne', 
+          new NotFoundException(`Aplicación no encontrada: ${idu_proyecto}`)
+        );
+      }
+
+      app.nom_aplicacion = this.encryptionService.decrypt(app.nom_aplicacion);
+      app.sourcecode.nom_codigo_fuente = this.encryptionService.decrypt(app.sourcecode.nom_codigo_fuente);
+
+      if (app.checkmarx && app.checkmarx.length > 0){
+        app.checkmarx.forEach(checkmarx => { 
+          checkmarx.nom_checkmarx = this.encryptionService.decrypt(checkmarx.nom_checkmarx);
+        });
+      }
+
+      return app;
+      
+    } catch (error) {
+      this.handleError('findOne',error);
+    }
+  }
+
   async updateStatusApp(idu_aplicacion: number, newStatusId: number) {
     try{
 
@@ -180,7 +213,7 @@ export class AplicacionesService {
       path_project: extractPath
     }
 
-    return await this.initProcessRVIA(dataToProcess, aplicacion, createAplicacionDto.num_accion);
+    return await this.initProcessRVIA(dataToProcess, aplicacion, createAplicacionDto.num_accion,pdfFile);
   }
 
   async createAppWithGit(createAplicacionDto: CreateAplicacionUrlDto, user: User, pdfFile: fileRVIA){
@@ -393,7 +426,7 @@ export class AplicacionesService {
     return aplicacion;
   }
   
-  private async initProcessRVIA(data: DataToMS, aplicacion: Aplicacion, num_accion: number){
+  private async initProcessRVIA(data: DataToMS, aplicacion: Aplicacion, num_accion: number, pdfFile:fileRVIA = null){
     let rviaProcess: ResponseProcess = { isProcessStarted: false, message: 'Error al crear el app y num_accion' };
 
     if(num_accion === NumberAction.UPDATECODE){
@@ -402,21 +435,16 @@ export class AplicacionesService {
     }
 
     if(num_accion === NumberAction.SANITIZECODE){
-      
+      console.log('Revisamos sanitización ->',pdfFile);
       let pdfProcess;
       // TODO llamar ms para guardar pdf
-      // if(pdfFile){
-      //   pdfProcess = await this.saveDocument(pdfFile,idu_proyecto);
-      //   console.log(rviaProcess);
-      // } else {
+      if(pdfFile){
+        pdfProcess = await this.saveDocument(data, pdfFile);
+        console.log(rviaProcess);
+      } else {
 
-      //   this.handleError(
-      //     'createAppWithFiles', 
-      //     `Error al guardar el pdf de sanitización`, 
-      //     new Error('pdf no encontrado')
-      //   )
-      //   let rviaProcess = { isProcessStarted: false, message: 'Error al crear el app y no se tiene pdf' };      
-      // }
+        rviaProcess = { isProcessStarted: false, message: 'Error falta PDF para sanitización' };      
+      }
 
       // TODO llamar al ms de sanitización
       // if(pdfProcess.isProcessStarted){
@@ -448,9 +476,9 @@ export class AplicacionesService {
     }
   }
 
-  private async saveDocument(file: fileRVIA, idu_aplicacion: number){
+  private async saveDocument(data: DataToMS, file: fileRVIA){
     try{
-      return lastValueFrom(this.client.send('rviadoc.find_one', {id: idu_aplicacion} ));
+      return lastValueFrom(this.client.send('rviadoc.upload_pdf', { idu_proyecto: data.idu_proyecto , file} ));
     } catch (error) {
       return { isProcessStarted: false, message: `Error al guardar el documento: ${error}` };
     }

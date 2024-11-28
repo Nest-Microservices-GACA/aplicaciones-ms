@@ -2,7 +2,7 @@ import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 
 import { AplicacionesService } from './aplicaciones.service';
-import { CreateAplicacionDto, CreateAplicacionUrlDto, GetAplicacionDto, UpdateStatusAppDto, User } from './dto';
+import { CreateAplicacionDto, CreateAplicacionUrlDto, GetAplicacionesDto, GetOneAplicacionDto, UpdateStatusAppDto, User } from './dto';
 import { fileRVIA } from './interfaces';
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -24,12 +24,17 @@ export class AplicacionesController {
   constructor(private readonly aplicacionesService: AplicacionesService) {}
 
   @MessagePattern('aplicaciones.findAll')
-  findAll(@Payload() getAplicacionDto: GetAplicacionDto) {
+  findAll(@Payload() getAplicacionDto: GetAplicacionesDto) {
     return this.aplicacionesService.findAll(getAplicacionDto.user);
   }
 
+  @MessagePattern('aplicaciones.findOne')
+  findOne(@Payload() getAplicacionDto: GetOneAplicacionDto) {
+    return this.aplicacionesService.findOne(getAplicacionDto.idu_proyecto);
+  }
+
   @MessagePattern('aplicaciones.updateStatus')
-  findOne(@Payload() updateStatus: UpdateStatusAppDto) {
+  updateStatusApp(@Payload() updateStatus: UpdateStatusAppDto) {
     return this.aplicacionesService.updateStatusApp(updateStatus.id, updateStatus.estatusId);
   }
 
