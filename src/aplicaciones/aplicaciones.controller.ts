@@ -8,16 +8,15 @@ import { fileRVIA } from './interfaces';
 // ---------------------------------------------------------------------------------------------------------------------------------------------
 // TODO - Aplicaciones
 // ---------------------------------------------------------------------------------------------------------------------------------------------
-// VERBO    | PATH REST                    | LISTO | MESSAGEPATTERN            | ACCION                                             |
-// -------------------------------------   ---------------------------------------------------------------------------------------------------------
-// @GET()   | /applications                |   ✅  | aplicaciones.findAll      | (Toma las aplicaciones del usuario que se le pasa) | 
-// @PATCH() | /aplications/:id             |   ✅  | aplicaciones.updateStatus | (Actualiza el estatus de la aplicacion)            |
-// @POST()  | /applications/new-app        |   ❌  | aplicaciones.createAppZip | (Guarda app de zip)                                |
-// @POST()  | /applications/new-app-git    |   ❌  | aplicaciones.createAppGit | (Guarda app de GITHUB)                             |
-// @POST()  | /applications/new-app-gitlab |   ❌  |                  | (Guarda app de GITLAB)                             |
+// VERBO    | PATH REST                    | LISTO | MESSAGEPATTERN               | ACCION                                             |
+// -------------------------------------   ------------------------------------------------------------------------------------------------------
+// @GET()   | /applications                |   ✅  | aplicaciones.findAll         | (Toma las aplicaciones del usuario que se le pasa) | 
+// @PATCH() | /aplications/:id             |   ✅  | aplicaciones.updateStatus    | (Actualiza el estatus de la aplicacion)            |
+// @POST()  | /applications/new-app        |   ❌  | aplicaciones.createAppZip    | (Guarda app de zip)                                |
+// @POST()  | /applications/new-app-git    |   ❌  | aplicaciones.createAppGit    | (Guarda app de GITHUB)                             |
+// @POST()  | /applications/new-app-gitlab |   ❌  | aplicaciones.createAppGitLab | (Guarda app de GITLAB)                             |
 
-
-// @GET()   | /applications/zip/:id |   ❌  |                  | (Descarga el zip del código fuente)                |
+// @GET()   | /applications/zip/:id        |   ❌  |                  | (Descarga el zip del código fuente)                |
 
 
 @Controller()
