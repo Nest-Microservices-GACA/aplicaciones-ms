@@ -4,6 +4,7 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 import { AplicacionesService } from './aplicaciones.service';
 import { CreateAplicacionDto, CreateAplicacionUrlDto, GetAplicacionesDto, GetOneAplicacionDto, UpdateStatusAppDto, User } from './dto';
 import { fileRVIA } from './interfaces';
+import { createReadStream } from 'fs';
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
 // TODO - Aplicaciones
@@ -12,9 +13,9 @@ import { fileRVIA } from './interfaces';
 // -------------------------------------   ------------------------------------------------------------------------------------------------------
 // @GET()   | /applications                |   ✅  | aplicaciones.findAll         | (Toma las aplicaciones del usuario que se le pasa) | 
 // @PATCH() | /aplications/:id             |   ✅  | aplicaciones.updateStatus    | (Actualiza el estatus de la aplicacion)            |
-// @POST()  | /applications/new-app        |   ❌  | aplicaciones.createAppZip    | (Guarda app de zip)                                |
-// @POST()  | /applications/new-app-git    |   ❌  | aplicaciones.createAppGit    | (Guarda app de GITHUB)                             |
-// @POST()  | /applications/new-app-gitlab |   ❌  | aplicaciones.createAppGitLab | (Guarda app de GITLAB)                             |
+// @POST()  | /applications/new-app        |   ✅  | aplicaciones.createAppZip    | (Guarda app de zip)                                |
+// @POST()  | /applications/new-app-git    |   ✅  | aplicaciones.createAppGit    | (Guarda app de GITHUB)                             |
+// @POST()  | /applications/new-app-gitlab |   ✅  | aplicaciones.createAppGitLab | (Guarda app de GITLAB)                             |
 
 // @GET()   | /applications/zip/:id        |   ❌  |                  | (Descarga el zip del código fuente)                |
 

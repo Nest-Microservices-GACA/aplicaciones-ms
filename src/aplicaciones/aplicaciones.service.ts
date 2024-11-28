@@ -18,7 +18,7 @@ import * as unzipper from 'unzipper';
 import { Aplicacion, Aplicacionstatus, Sourcecode } from './entities';
 import { CommonService } from '../common/common.service';
 import { CreateAplicacionDto, CreateAplicacionUrlDto, User } from './dto';
-import { DataToMS, fileRVIA, NumberAction, ResponseProcess } from './interfaces';
+import { DataToMS, fileRVIA, NumberAction, ResponseProcess, StatusApp } from './interfaces';
 import { envs, NATS_SERVICE } from '../config';
 
 @Injectable()
@@ -251,6 +251,40 @@ export class AplicacionesService {
     }
   }
 
+  async downloadFile7z(idu_proyecto: number){
+    const app = await this.appRepository.findOne({
+      where: { idu_proyecto: `${idu_proyecto}` },
+      relations: ['applicationstatus'],
+    });
+
+    if(!app){
+      this.handleError(
+        'downloadFile7z', 
+        new NotFoundException(`Aplicación no encontrada: ${idu_proyecto}`)
+      );
+    }
+
+    if(app.applicationstatus.idu_estatus_aplicacion !== StatusApp.DONE){
+      this.handleError(
+        'downloadFile7z', 
+        new InternalServerErrorException(`Aplicación no TERMINADA para descargar: ${idu_proyecto}`)
+      );
+    }
+
+    const dirName = envs.path_projects;
+
+    const decryptedAppName = this.encryptionService.decrypt(app.nom_aplicacion);
+    const filePath = join(dirName, `${app.idu_proyecto}_${decryptedAppName}.7z`);
+    if (!fs.existsSync(filePath)){
+      this.handleError(
+        'downloadFile7z', 
+        new NotFoundException(`Archivo ${app.idu_proyecto}_${decryptedAppName}.7z no encontrado`)
+      );
+    }
+
+    return fs.readFileSync(filePath);
+  }
+
   private async processRepository(repoName: string, repoUserName: string, user: User, infoApp: CreateAplicacionDto,  file, platform: string) {
 
     const obj = this.addon.CRvia(this.crviaEnvironment);
@@ -326,7 +360,7 @@ export class AplicacionesService {
         path_project: finalFolder
       }
 
-      return await this.initProcessRVIA(dataToProcess, aplicacion, infoApp.num_accion);
+      return await this.initProcessRVIA(dataToProcess, aplicacion, infoApp.num_accion,file);
       
     } catch (error) {
       await fsExtra.remove(finalFolder);
@@ -428,6 +462,7 @@ export class AplicacionesService {
   
   private async initProcessRVIA(data: DataToMS, aplicacion: Aplicacion, num_accion: number, pdfFile:fileRVIA = null){
     let rviaProcess: ResponseProcess = { isProcessStarted: false, message: 'Error al crear el app y num_accion' };
+    aplicacion.nom_aplicacion = this.encryptionService.decrypt(aplicacion.nom_aplicacion);
 
     if(num_accion === NumberAction.UPDATECODE){
       data.num_accion = NumberAction.UPDATECODE;
@@ -435,23 +470,22 @@ export class AplicacionesService {
     }
 
     if(num_accion === NumberAction.SANITIZECODE){
-      console.log('Revisamos sanitización ->',pdfFile);
-      let pdfProcess;
-      // TODO llamar ms para guardar pdf
+      let pdfProcess: { message: string; error?: string; isValid?: boolean; checkmarx?: any };
+      
       if(pdfFile){
-        pdfProcess = await this.saveDocument(data, pdfFile);
-        console.log(rviaProcess);
-      } else {
+        pdfProcess = await this.saveDocument(data, aplicacion, pdfFile);
+        
+        if(pdfProcess.isValid){
+          data.num_accion = NumberAction.SANITIZECODE;
+          rviaProcess = await this.initSanitizeCode(data);
+        }else{
+          rviaProcess = { isProcessStarted: false, message: pdfProcess.message };      
+        }
 
+      } else {
         rviaProcess = { isProcessStarted: false, message: 'Error falta PDF para sanitización' };      
       }
 
-      // TODO llamar al ms de sanitización
-      // if(pdfProcess.isProcessStarted){
-        // dataToProcess.num_accion = NumberAction.SANITIZECODE;
-        // rviaProcess = await this.initSanitizeCode(dataToProcess);
-        // console.log(rviaProcess);
-      // }
     }
 
     if(num_accion === NumberAction.MIGRATIONCODE){
@@ -459,8 +493,6 @@ export class AplicacionesService {
       rviaProcess = await this.initMigrationCode(data);
     }
     
-    aplicacion.nom_aplicacion = this.encryptionService.decrypt(aplicacion.nom_aplicacion);
-
     return {
       aplicacion,
       rviaProcess
@@ -476,9 +508,21 @@ export class AplicacionesService {
     }
   }
 
-  private async saveDocument(data: DataToMS, file: fileRVIA){
-    try{
-      return lastValueFrom(this.client.send('rviadoc.upload_pdf', { idu_proyecto: data.idu_proyecto , file} ));
+  private async saveDocument(data: DataToMS,aplicacion: Aplicacion, file: fileRVIA){
+    try{      
+      const payload = {
+        dto: {
+          idu_proyecto: data.idu_proyecto,
+          nom_aplicacion: aplicacion.nom_aplicacion,
+          idu_aplicacion: aplicacion.idu_aplicacion
+        },
+        file
+      }
+      return lastValueFrom(this.client.send(
+        'rviadoc.upload_pdf', 
+        payload  
+      )
+      );
     } catch (error) {
       return { isProcessStarted: false, message: `Error al guardar el documento: ${error}` };
     }
