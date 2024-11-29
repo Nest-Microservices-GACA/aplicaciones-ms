@@ -69,4 +69,9 @@ export class AplicacionesController {
     return this.aplicacionesService.createAppWithGitLab(data.createAplicacionDto, data.user, data.pdfName);
   }
 
+  @MessagePattern('aplicaciones.donwloadApp')
+  downloadApp(@Payload() data: GetOneAplicacionDto){
+    return this.aplicacionesService.downloadApp(data.idu_proyecto);
+  }
+
 }

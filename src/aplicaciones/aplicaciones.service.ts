@@ -551,6 +551,41 @@ export class AplicacionesService {
       return { isProcessStarted: false, message: `Error iniciando el proceso de migración: ${error}` }; 
     }
   }
+
+  async downloadApp(idu_proyecto: number){
+    const app = await this.appRepository.findOne({
+      where: { idu_proyecto: `${idu_proyecto}` },
+      relations: ['applicationstatus'],
+    });
+
+    //TODO [✅] revisar la app exista
+    //TODO [✅] revisar el estatus completado de la app
+    //TODO [❌] revisar si existe el archivo .7z
+    //TODO [❌] descargar el archivo .7z
+    
+    console.log(idu_proyecto);
+    console.log(app);
+
+    if(!app){
+      this.handleError(
+        'downloadApp', 
+        new NotFoundException(`Aplicación no encontrada: ${idu_proyecto}`)
+      );
+    }
+
+    if(app.clv_estatus !== StatusApp.DONE){
+      this.handleError(
+        'downloadApp', 
+        new InternalServerErrorException(`Aplicación no COMPLETADA para descargar: ${idu_proyecto}`)
+      );
+    }
+
+    const dirName = this.encryptionService.decrypt(app.sourcecode.nom_directorio);
+    console.log(dirName);
+
+    
+    return 'Descargaremos';
+  }
   
   private handleError(method:string, error: any){
     this.logger.error(`[aplicaciones.${ method }]`,error);
@@ -562,18 +597,18 @@ export class AplicacionesService {
       });
     }
 
-    if (error.response){
-      throw new RpcException({
-        status: 400,
-        message: error.message,
-      });
-    }
-
     if(error.error){
       throw new RpcException({
         status: error.error.status,
         message: error.error.message,
       });  
+    }
+
+    if (error.response){
+      throw new RpcException({
+        status: error.status,
+        message: error.response.message,
+      });
     }
 
     throw new RpcException({
