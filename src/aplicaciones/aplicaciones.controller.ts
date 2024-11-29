@@ -14,7 +14,7 @@ import { createReadStream } from 'fs';
 // @GET()   | /applications                |   ✅  | aplicaciones.findAll         | (Toma las aplicaciones del usuario que se le pasa) | 
 // @PATCH() | /aplications/:id             |   ✅  | aplicaciones.updateStatus    | (Actualiza el estatus de la aplicacion)            |
 // @POST()  | /applications/new-app        |   ✅  | aplicaciones.createAppZip    | (Guarda app de zip)                                |
-// @POST()  | /applications/new-app-git    |   ✅  | aplicaciones.createAppGit    | (Guarda app de GITHUB)                             |
+// @POST()  | /applications/new-app-git    |   ✅  | aplicaciones.createAppGitHub | (Guarda app de GITHUB)                             |
 // @POST()  | /applications/new-app-gitlab |   ✅  | aplicaciones.createAppGitLab | (Guarda app de GITLAB)                             |
 
 // @GET()   | /applications/zip/:id        |   ❌  |                  | (Descarga el zip del código fuente)                |
@@ -42,29 +42,31 @@ export class AplicacionesController {
   @MessagePattern('aplicaciones.createAppZip')
   createAppZip(@Payload() data: { 
     createAplicacionDto: CreateAplicacionDto, 
-    zipOr7zFile: fileRVIA, 
-    pdfFile: fileRVIA, 
+    appName: string, 
+    zipName: string, 
+    fileType: string,
+    pdfName: string | null, 
     user: User 
   }) {
-    return this.aplicacionesService.createAppWithFiles(data.createAplicacionDto, data.zipOr7zFile, data.pdfFile, data.user);
+    return this.aplicacionesService.createAppWithFiles(data.createAplicacionDto, data.appName, data.zipName, data.pdfName, data.fileType, data.user);
   }
 
   @MessagePattern('aplicaciones.createAppGitHub')
   createAppGit(@Payload() data: { 
     createAplicacionDto: CreateAplicacionUrlDto, 
     user: User, 
-    pdfFile: fileRVIA | null, 
+    pdfName: string | null, 
   }) {
-    return this.aplicacionesService.createAppWithGit(data.createAplicacionDto, data.user, data.pdfFile);
+    return this.aplicacionesService.createAppWithGit(data.createAplicacionDto, data.user, data.pdfName);
   }
 
   @MessagePattern('aplicaciones.createAppGitLab')
   createAppGitLab(@Payload() data: { 
     createAplicacionDto: CreateAplicacionUrlDto, 
     user: User, 
-    pdfFile: fileRVIA | null, 
+    pdfName: string | null, 
   }) {
-    return this.aplicacionesService.createAppWithGitLab(data.createAplicacionDto, data.user, data.pdfFile);
+    return this.aplicacionesService.createAppWithGitLab(data.createAplicacionDto, data.user, data.pdfName);
   }
 
 }

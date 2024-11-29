@@ -18,7 +18,7 @@ import * as unzipper from 'unzipper';
 import { Aplicacion, Aplicacionstatus, Sourcecode } from './entities';
 import { CommonService } from '../common/common.service';
 import { CreateAplicacionDto, CreateAplicacionUrlDto, User } from './dto';
-import { DataToMS, fileRVIA, NumberAction, ResponseProcess, StatusApp } from './interfaces';
+import { DataToMS, DataToPython, fileRVIA, NumberAction, ResponseProcess, StatusApp } from './interfaces';
 import { envs, NATS_SERVICE } from '../config';
 
 @Injectable()
@@ -148,26 +148,35 @@ export class AplicacionesService {
     }
   }
 
-  async createAppWithFiles(createAplicacionDto: CreateAplicacionDto, zipFile: fileRVIA, pdfFile: fileRVIA, user: User ){
+  async createAppWithFiles(createAplicacionDto: CreateAplicacionDto, appName:string, zipFile: string, pdfFile: string | null, fileType: string, user: User ){
 
     const obj = this.addon.CRvia(this.crviaEnvironment);
     const idu_proyecto = obj.createIDProject();
-    const fileParts = zipFile.originalname.split('.');
-    const fileExtension = fileParts.pop();
     const dirName = envs.path_projects;
-    const appName = fileParts.join('.').replace(/\s+/g, '-');
-    const appNameWIdu = idu_proyecto + '_' + appName ;
+
+    const fileParts = appName.split('.');
+    const fileExtension = fileParts.pop();
+    const newAppName = fileParts.join('.').replace(/\s+/g, '-');   
+    const appNameWIdu = idu_proyecto + '_' + newAppName ;
+
+    const oldPath = `${dirName}/${zipFile}`; 
+    const newPath = `${dirName}/${idu_proyecto}_${appName}`;
     
-    const zipFilePath = join(dirName, `${appNameWIdu}.${fileExtension}`);
-    const zipBuffer = Buffer.from(zipFile.buffer.data);
-    await fsExtra.writeFile(zipFilePath, zipBuffer);
+    try {
+      await fsExtra.rename(oldPath, newPath);
+    } catch (error) {
+      this.handleError(
+        'createAppWithFiles', 
+        new InternalServerErrorException(`Error al renombrar el archivo: ${error.message}`)
+      )
+    }
     
     const extractPath = join(dirName, appNameWIdu);
     await fsExtra.mkdirp(extractPath);
 
     try {
-      if (zipFile.mimetype === 'application/zip' || zipFile.mimetype === 'application/x-zip-compressed') {
-        await fsExtra.createReadStream(zipFilePath)
+      if (fileType === 'application/zip' || fileType === 'application/x-zip-compressed') {
+        await fsExtra.createReadStream(newPath)
           .pipe(unzipper.Extract({ path: extractPath }))
           .promise()
           .then(() => {})
@@ -177,9 +186,9 @@ export class AplicacionesService {
               new InternalServerErrorException(`Error al descomprimir el archivo .zip: ${error.message}`)
             )
           });
-      } else if (zipFile.mimetype === 'application/x-7z-compressed') {
+      } else if (fileType === 'application/x-7z-compressed') {
         await new Promise<void>((resolve, reject) => {
-          seven.unpack(zipFilePath, extractPath, error => {
+          seven.unpack(newPath, extractPath, error => {
             if (error) {
               reject(
                 this.handleError(
@@ -204,8 +213,8 @@ export class AplicacionesService {
       );
     }
 
-    const aplicacion = await this.saveAppBD(createAplicacionDto, idu_proyecto, appName, extractPath, user.idu_usuario);
-    
+    const aplicacion = await this.saveAppBD(createAplicacionDto, idu_proyecto, newAppName, extractPath, user.idu_usuario);
+
     const dataToProcess = { 
       idu_proyecto,
       num_accion: 0,
@@ -216,7 +225,7 @@ export class AplicacionesService {
     return await this.initProcessRVIA(dataToProcess, aplicacion, createAplicacionDto.num_accion,pdfFile);
   }
 
-  async createAppWithGit(createAplicacionDto: CreateAplicacionUrlDto, user: User, pdfFile: fileRVIA){
+  async createAppWithGit(createAplicacionDto: CreateAplicacionUrlDto, user: User, pdfFile: string){
     try {
       const repoInfo = this.parseGitHubURL(createAplicacionDto.url);
       if (!repoInfo) {
@@ -226,14 +235,14 @@ export class AplicacionesService {
         );
       }
 
-      return await this.processRepository(repoInfo.repoName, repoInfo.userName, user, createAplicacionDto ,pdfFile,  'GitHub');
+      return await this.processRepository(repoInfo.repoName, repoInfo.userName, user, createAplicacionDto , pdfFile, 'GitHub');
 
     } catch (error) {
       this.handleError('createAppWithGit', error);
     }
   }
 
-  async createAppWithGitLab(createAplicacionDto: CreateAplicacionUrlDto, user: User, pdfFile: fileRVIA){
+  async createAppWithGitLab(createAplicacionDto: CreateAplicacionUrlDto, user: User, pdfFile: string){
 
     try {
       const repoInfo = this.getRepoInfo(createAplicacionDto.url);
@@ -285,7 +294,7 @@ export class AplicacionesService {
     return fs.readFileSync(filePath);
   }
 
-  private async processRepository(repoName: string, repoUserName: string, user: User, infoApp: CreateAplicacionDto,  file, platform: string) {
+  private async processRepository(repoName: string, repoUserName: string, user: User, infoApp: CreateAplicacionDto,  file: string | null, platform: string) {
 
     const obj = this.addon.CRvia(this.crviaEnvironment);
     const idu_proyecto = obj.createIDProject();
@@ -460,7 +469,7 @@ export class AplicacionesService {
     return aplicacion;
   }
   
-  private async initProcessRVIA(data: DataToMS, aplicacion: Aplicacion, num_accion: number, pdfFile:fileRVIA = null){
+  private async initProcessRVIA(data: DataToMS, aplicacion: Aplicacion, num_accion: number, pdfFile: string){
     let rviaProcess: ResponseProcess = { isProcessStarted: false, message: 'Error al crear el app y num_accion' };
     aplicacion.nom_aplicacion = this.encryptionService.decrypt(aplicacion.nom_aplicacion);
 
@@ -473,7 +482,14 @@ export class AplicacionesService {
       let pdfProcess: { message: string; error?: string; isValid?: boolean; checkmarx?: any };
       
       if(pdfFile){
-        pdfProcess = await this.saveDocument(data, aplicacion, pdfFile);
+        const dataPython: DataToPython = {
+          idu_proyecto: data.idu_proyecto,
+          idu_aplicacion: aplicacion.idu_aplicacion,
+          nom_aplicacion: aplicacion.nom_aplicacion,
+          pdfFile
+        }
+
+        pdfProcess = await this.saveDocument(dataPython);
         
         if(pdfProcess.isValid){
           data.num_accion = NumberAction.SANITIZECODE;
@@ -508,19 +524,11 @@ export class AplicacionesService {
     }
   }
 
-  private async saveDocument(data: DataToMS,aplicacion: Aplicacion, file: fileRVIA){
+  private async saveDocument(data: DataToPython ){
     try{      
-      const payload = {
-        dto: {
-          idu_proyecto: data.idu_proyecto,
-          nom_aplicacion: aplicacion.nom_aplicacion,
-          idu_aplicacion: aplicacion.idu_aplicacion
-        },
-        file
-      }
       return lastValueFrom(this.client.send(
         'rviadoc.upload_pdf', 
-        payload  
+        data  
       )
       );
     } catch (error) {
