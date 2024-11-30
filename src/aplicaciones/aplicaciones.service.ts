@@ -557,15 +557,7 @@ export class AplicacionesService {
       where: { idu_proyecto: `${idu_proyecto}` },
       relations: ['applicationstatus'],
     });
-
-    //TODO [✅] revisar la app exista
-    //TODO [✅] revisar el estatus completado de la app
-    //TODO [❌] revisar si existe el archivo .7z
-    //TODO [❌] descargar el archivo .7z
-    
-    console.log(idu_proyecto);
-    console.log(app);
-
+  
     if(!app){
       this.handleError(
         'downloadApp', 
@@ -581,10 +573,18 @@ export class AplicacionesService {
     }
 
     const dirName = this.encryptionService.decrypt(app.sourcecode.nom_directorio);
-    console.log(dirName);
+    const filePath = `${dirName}.7z`;
 
+    const exists = await fsExtra.pathExists(filePath);
+    if (!exists) {
+      this.handleError(
+        'downloadApp', 
+        new NotFoundException(`Comprimido 7z no encontrado: ${idu_proyecto}`)
+      );
+    }
+
+    return filePath;
     
-    return 'Descargaremos';
   }
   
   private handleError(method:string, error: any){
