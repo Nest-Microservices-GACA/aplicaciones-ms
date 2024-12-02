@@ -260,38 +260,53 @@ export class AplicacionesService {
     }
   }
 
-  async downloadFile7z(idu_proyecto: number){
-    const app = await this.appRepository.findOne({
-      where: { idu_proyecto: `${idu_proyecto}` },
-      relations: ['applicationstatus'],
-    });
+  async downloadFile7z(idu_proyecto: number): Promise<{ status: boolean; message: string; fileName: string; filePath: string }> {
+    try {
+      // Buscar la aplicación
+      const app = await this.appRepository.findOne({
+        where: { idu_proyecto: `${idu_proyecto}` },
+        relations: ['applicationstatus'],
+      });
 
-    if(!app){
-      this.handleError(
-        'downloadFile7z', 
-        new NotFoundException(`Aplicación no encontrada: ${idu_proyecto}`)
-      );
+      if (!app) {
+        throw new NotFoundException(`Aplicación no encontrada: ${idu_proyecto}`);
+      }
+
+      // Validar el estado de la aplicación
+      if (app.applicationstatus.idu_estatus_aplicacion !== StatusApp.DONE) {
+        throw new InternalServerErrorException(
+          `Aplicación no TERMINADA para descargar: ${idu_proyecto}`,
+        );
+      }
+
+      // Construir la ruta al archivo
+      const dirName = envs.path_projects;
+      const decryptedAppName = this.encryptionService.decrypt(app.nom_aplicacion);
+      const filePath = join(dirName, `${app.idu_proyecto}_${decryptedAppName}.7z`);
+
+      // Validar la existencia del archivo
+      if (!fs.existsSync(filePath)) {
+        throw new NotFoundException(
+          `Archivo ${app.idu_proyecto}_${decryptedAppName}.7z no encontrado`,
+        );
+      }
+
+      // Si todo está bien, retornar el éxito
+      return {
+        status: true,
+        message: 'Archivo listo para descargar.',
+        fileName: `${app.idu_proyecto}_${decryptedAppName}.7z`,
+        filePath: filePath
+      };
+    } catch (error) {
+      // Manejo centralizado de errores
+      return {
+        status: false,
+        message: error.message || 'Error desconocido al descargar el archivo.',
+        filePath: '',
+        fileName: '',
+      };
     }
-
-    if(app.applicationstatus.idu_estatus_aplicacion !== StatusApp.DONE){
-      this.handleError(
-        'downloadFile7z', 
-        new InternalServerErrorException(`Aplicación no TERMINADA para descargar: ${idu_proyecto}`)
-      );
-    }
-
-    const dirName = envs.path_projects;
-
-    const decryptedAppName = this.encryptionService.decrypt(app.nom_aplicacion);
-    const filePath = join(dirName, `${app.idu_proyecto}_${decryptedAppName}.7z`);
-    if (!fs.existsSync(filePath)){
-      this.handleError(
-        'downloadFile7z', 
-        new NotFoundException(`Archivo ${app.idu_proyecto}_${decryptedAppName}.7z no encontrado`)
-      );
-    }
-
-    return fs.readFileSync(filePath);
   }
 
   private async processRepository(repoName: string, repoUserName: string, user: User, infoApp: CreateAplicacionDto,  file: string | null, platform: string) {

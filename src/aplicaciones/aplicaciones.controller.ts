@@ -69,4 +69,10 @@ export class AplicacionesController {
     return this.aplicacionesService.createAppWithGitLab(data.createAplicacionDto, data.user, data.pdfName);
   }
 
+
+  @MessagePattern('aplicaciones.download7z')
+  downloadApp(@Payload() getAplicacionDto: GetOneAplicacionDto) {
+    return this.aplicacionesService.downloadFile7z(getAplicacionDto.idu_proyecto);
+  }
+
 }
