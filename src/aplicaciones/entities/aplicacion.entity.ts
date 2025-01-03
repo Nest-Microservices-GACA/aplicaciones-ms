@@ -5,6 +5,7 @@ import { Checkmarx } from "./checkmarx.entity";
 import { Aplicacionstatus } from "./aplicacionstatus.entity";
 import { Sourcecode } from "./sourcecode.entity";
 import { Scan } from "./scan.entity";
+import { Cost } from "./cost.entity";
 
 @Entity('tbl_aplicaciones')
 export class Aplicacion {
@@ -80,4 +81,7 @@ export class Aplicacion {
 
     @OneToMany(() => Scan, scan => scan.application)
     scans: Scan[];
+
+    @OneToMany(() => Cost, cost => cost.application)
+    cost: Cost[];
 }

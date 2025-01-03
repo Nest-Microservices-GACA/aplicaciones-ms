@@ -3,7 +3,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { Aplicacion, Aplicacionstatus, Checkmarx, Scan, Sourcecode } from './entities';
+import { Aplicacion, Aplicacionstatus, Checkmarx, Cost, Scan, Sourcecode } from './entities';
 import { AplicacionesController } from './aplicaciones.controller';
 import { AplicacionesService } from './aplicaciones.service';
 import { CommonModule } from '../common/common.module';
@@ -19,6 +19,7 @@ import { envs, NATS_SERVICE } from '../config';
       Checkmarx,
       Scan,
       Sourcecode,
+      Cost
     ]),
     ClientsModule.register([
       { 

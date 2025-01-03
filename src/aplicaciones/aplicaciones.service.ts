@@ -15,10 +15,10 @@ import * as fsExtra from 'fs-extra';
 import * as seven from '7zip-min';
 import * as unzipper from 'unzipper';
 
-import { Aplicacion, Aplicacionstatus, Sourcecode } from './entities';
+import { Aplicacion, Aplicacionstatus, Cost, Sourcecode } from './entities';
 import { CommonService } from '../common/common.service';
 import { CreateAplicacionDto, CreateAplicacionUrlDto, User } from './dto';
-import { DataToMS, DataToPython, fileRVIA, NumberAction, ResponseProcess, StatusApp } from './interfaces';
+import { DataToMS, DataToPython, NumberAction, ResponseProcess, StatusApp } from './interfaces';
 import { envs, NATS_SERVICE } from '../config';
 
 @Injectable()
@@ -50,6 +50,7 @@ export class AplicacionesService {
 
       const queryBuilder = this.appRepository.createQueryBuilder('application')
       .leftJoinAndSelect('application.checkmarx', 'checkmarx')
+      .leftJoinAndSelect('application.cost', 'cost')
       .leftJoinAndSelect('application.sourcecode', 'sourcecode')
       .orderBy('application.fec_creacion', 'ASC');
 
@@ -58,10 +59,15 @@ export class AplicacionesService {
       }
 
       const aplicaciones = await queryBuilder.getMany();
-
+      console.log(aplicaciones);
       aplicaciones.forEach( app => {
         app.nom_aplicacion = this.encryptionService.decrypt(app.nom_aplicacion);
         app.sourcecode.nom_codigo_fuente = this.encryptionService.decrypt(app.sourcecode.nom_codigo_fuente);
+
+        (app as any).totalCost = app.cost.reduce<number>(
+          (sum, cost) => sum + (cost.val_monto ? parseFloat(cost.val_monto) : 0),
+          0
+        );
 
         if (app.checkmarx && app.checkmarx.length > 0){
           app.checkmarx.forEach(checkmarx => { 
@@ -262,36 +268,33 @@ export class AplicacionesService {
 
   async downloadFile7z(idu_proyecto: number): Promise<{ status: boolean; message: string; fileName: string; filePath: string }> {
     try {
-      // Buscar la aplicación
       const app = await this.appRepository.findOne({
         where: { idu_proyecto: `${idu_proyecto}` },
         relations: ['applicationstatus'],
       });
+      console.log(idu_proyecto);
+      console.log(app);
 
       if (!app) {
         throw new NotFoundException(`Aplicación no encontrada: ${idu_proyecto}`);
       }
 
-      // Validar el estado de la aplicación
       if (app.applicationstatus.idu_estatus_aplicacion !== StatusApp.DONE) {
         throw new InternalServerErrorException(
           `Aplicación no TERMINADA para descargar: ${idu_proyecto}`,
         );
       }
 
-      // Construir la ruta al archivo
       const dirName = envs.path_projects;
       const decryptedAppName = this.encryptionService.decrypt(app.nom_aplicacion);
       const filePath = join(dirName, `${app.idu_proyecto}_${decryptedAppName}.7z`);
 
-      // Validar la existencia del archivo
       if (!fs.existsSync(filePath)) {
         throw new NotFoundException(
           `Archivo ${app.idu_proyecto}_${decryptedAppName}.7z no encontrado`,
         );
       }
 
-      // Si todo está bien, retornar el éxito
       return {
         status: true,
         message: 'Archivo listo para descargar.',
@@ -299,7 +302,6 @@ export class AplicacionesService {
         filePath: filePath
       };
     } catch (error) {
-      // Manejo centralizado de errores
       return {
         status: false,
         message: error.message || 'Error desconocido al descargar el archivo.',
